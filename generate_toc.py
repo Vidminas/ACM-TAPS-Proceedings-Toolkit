@@ -130,6 +130,16 @@ def generate_toc(excel_path: str, output_stem: str = "chiir_toc"):
 
     df = df.sort_values("ORDER ID").reset_index(drop=True)
 
+    # TAPS leaves PDFPAGES blank until a paper is processed; page numbers
+    # would be wrong for every later paper, so stop and name the papers.
+    pages = pd.to_numeric(df["PDFPAGES"], errors="coerce")
+    if pages.isna().any():
+        missing = [clean_html_entities(t) for t in df.loc[pages.isna(), "TITLE"]]
+        raise ValueError(
+            "PDFPAGES is missing or not a number for: " + "; ".join(missing)
+            + ". Wait until TAPS has processed these papers, then export again."
+        )
+
     # --- Build flat records with start pages ----------------------------
     records = []
     current_page = 1
