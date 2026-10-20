@@ -12,19 +12,19 @@ CSV pair (submission.csv author.csv).
 Usage:
     # eRights CSV files (one per paper type + combined) for upload
     python easychair_export.py --config chiir2027.json --input submission.csv author.csv \\
-        --format csv --event_id 1234567 --output out/
+        --format csv --event_id 1234567 --output ~/CHIIR2027-proceedings/output/
 
     # ACM/Sheridan XML
     python easychair_export.py --config chiir2027.json --input export.xlsx \\
-        --format xml --proceeding_id 2027-CHIIR --output out/chiir2027.xml
+        --format xml --proceeding_id 2027-CHIIR --output ~/CHIIR2027-proceedings/output/chiir2027.xml
 
     # Heading preview to send to authors before eRights
     python easychair_export.py --config chiir2027.json --input export.xlsx \\
-        --format preview --output out/headings.txt
+        --format preview --output ~/CHIIR2027-proceedings/output/headings.txt
 
     # Re-issue one paper after it was removed from TAPS/eRights
     python easychair_export.py --config chiir2027.json --input export.xlsx \\
-        --format csv --event_id 1234567 --paper_id 42 --output out/reissue-42/
+        --format csv --event_id 1234567 --paper_id 42 --output ~/CHIIR2027-proceedings/output/reissue-42/
 """
 
 import argparse
@@ -42,6 +42,14 @@ from proceedings.exporters import (
     print_summary,
 )
 from proceedings.loader import load_affiliation_mapping, load_easychair_data
+
+REPO_ROOT = Path(__file__).resolve().parent
+
+
+def inside_repository(path) -> bool:
+    """True if path is in this repository (where author data must not go)."""
+    resolved = Path(path).expanduser().resolve()
+    return resolved == REPO_ROOT or REPO_ROOT in resolved.parents
 
 
 def setup_logging(log_file: str) -> logging.Logger:
@@ -107,8 +115,8 @@ def main(argv=None):
                         help="EasyChair Excel workbook, or submission.csv author.csv")
     parser.add_argument("--format", choices=["csv", "xml", "txt", "md", "preview"], default="csv",
                         help="Output format (default: csv)")
-    parser.add_argument("--output", default=None, metavar="PATH",
-                        help="Output file (xml/txt/md/preview) or folder (csv). Default: acm_output.<format> / ./")
+    parser.add_argument("--output", required=True, metavar="PATH",
+                        help="Output file (xml/txt/md/preview) or folder (csv), outside this repository")
     parser.add_argument("--event_id", metavar="ID",
                         help="ACM event ID from the eRights confirmation email (required for csv)")
     parser.add_argument("--proceeding_id", metavar="ID",
@@ -137,8 +145,10 @@ def main(argv=None):
     if args.format == "xml" and not args.proceeding_id:
         parser.error("--proceeding_id is required for --format xml")
 
-    if args.output is None:
-        args.output = "." if args.format == "csv" else f"acm_output.{args.format if args.format != 'preview' else 'txt'}"
+    if inside_repository(args.output):
+        parser.error("--output is inside the repository; the files contain author data, "
+                     "so write them to a folder outside it (e.g. ~/CHIIR2027-proceedings/output)")
+    args.output = str(Path(args.output).expanduser())
     if args.format == "csv":
         Path(args.output).mkdir(parents=True, exist_ok=True)
         log_file = str(Path(args.output) / "export.log")

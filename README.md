@@ -65,7 +65,7 @@ The toolkit includes these lessons:
 The last cell of the notebook writes the conference settings to a JSON file. It also shows the related command. Use this command to do the export again without Jupyter. For example:
 
 ```bash
-python easychair_export.py --config chiir2027.json --input submission.csv author.csv --format csv --event_id 1234567 --submission_date 15-OCT-2026 --approval_date 01-DEC-2026 --output out/
+python easychair_export.py --config chiir2027.json --input submission.csv author.csv --format csv --event_id 1234567 --submission_date 15-OCT-2026 --approval_date 01-DEC-2026 --output ~/CHIIR2027-proceedings/output/
 ```
 
 These are the other formats:
@@ -74,7 +74,7 @@ These are the other formats:
 - `--format preview` for the heading preview
 - `--format txt` or `--format md` for a simple list of papers
 
-Use `--paper_id N` to export only paper N. The command compares each export with the EasyChair data. If it finds an error, the exit status is 1.
+The `--output` path must be outside the repository. Use `--paper_id N` to export only paper N. The command compares each export with the EasyChair data. If it finds an error, the exit status is 1.
 
 | Script | Function |
 |---|---|
