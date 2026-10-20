@@ -36,6 +36,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from proceedings.loader import load_affiliation_mapping
+
 DEFAULT_INPUT_DIR = "referees"
 DEFAULT_OUTPUT_FILE = "referees.xlsx"
 
@@ -226,11 +228,10 @@ def load_mappings(path: str) -> dict[str, str]:
     """Load affiliation canonicalization mappings from a JSON file.
 
     Expected shape: {"affiliations": {...}}. Keys are matched
-    case-insensitively against the whole stripped affiliation value.
+    case-insensitively against the whole stripped affiliation value. Uses the
+    same parser as the paper export, so both read the file identically.
     """
-    with open(path, encoding="utf-8") as fh:
-        data = json.load(fh)
-    return {k.lower(): v for k, v in (data.get("affiliations") or {}).items()}
+    return load_affiliation_mapping(path)
 
 
 def _fix_capitalization(name: str) -> str:
