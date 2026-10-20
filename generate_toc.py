@@ -64,7 +64,7 @@ def build_author_list(row: pd.Series) -> list[str]:
     authors = []
 
     # Prepend the first/corresponding author if it lives in its own column
-    if "FIRST AUTHOR" in row.index:
+    if "FIRST AUTHOR" in row.index and pd.notna(row["FIRST AUTHOR"]):
         first = clean_html_entities(str(row["FIRST AUTHOR"])).strip()
         if first:
             authors.append(first)
