@@ -24,11 +24,27 @@ from typing import Dict, List, Optional
 
 from .config import ConferenceConfig
 from .exporters import ERIGHTS_CSV_COLUMNS, clean_affiliation_string
-from .loader import Source, accepted_submissions, clean_text, parse_authors_from_string, read_easychair
+from .loader import Source, accepted_submissions, clean_text, read_easychair
 
 
 def _norm(name: str) -> str:
     return " ".join(str(name).lower().split())
+
+
+def names_in_order(names: List[str], authors_str: str) -> bool:
+    """
+    True if each name occurs in the Submissions.Authors text after the
+    previous one. Searching the text, rather than splitting it on commas,
+    keeps names that contain a comma (e.g. 'Martin King, Jr.') intact.
+    """
+    text = _norm(authors_str)
+    position = 0
+    for name in names:
+        found = text.find(name, position)
+        if found < 0:
+            return False
+        position = found + len(name)
+    return True
 
 
 def check_xml_against_source(
@@ -75,10 +91,9 @@ def check_xml_against_source(
             problems.append(f"Paper #{paper_id}: {len(contacts)} contact authors (expected exactly 1)")
 
         authors_str = expected[paper_id].get("Authors", "")
-        expected_order = [_norm(n) for n in parse_authors_from_string(authors_str)] if isinstance(authors_str, str) else []
-        if expected_order and names != expected_order:
+        if isinstance(authors_str, str) and authors_str.strip() and not names_in_order(names, authors_str):
             problems.append(
-                f"Paper #{paper_id}: author order {names} does not match Submissions.Authors {expected_order}"
+                f"Paper #{paper_id}: author order {names} does not match Submissions.Authors '{clean_text(authors_str)}'"
             )
 
         rows = authors_df[authors_df["Submission #"] == paper_id]
