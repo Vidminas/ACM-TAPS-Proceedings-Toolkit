@@ -1,0 +1,23 @@
+{
+  "name": "CHIIR",
+  "year": 2027,
+  "accepted_decisions": ["accept", "probably accept"],
+  "paper_types": [
+    {"name": "Full Paper", "prefix": "fp", "heading": "Full Papers", "file_stem": "Full-Papers"},
+    {"name": "Short Paper", "prefix": "sp", "heading": "Short Papers", "file_stem": "Short-Papers"},
+    {"name": "Demonstration Paper", "prefix": "dp", "heading": "Demonstrations", "file_stem": "Demonstrations"},
+    {"name": "Doctoral Consortium", "prefix": "dc", "heading": "Doctoral Consortium", "file_stem": "Doctoral-Consortium"},
+    {"name": "Tutorial", "prefix": "tp", "heading": "Tutorials", "file_stem": "Tutorials"},
+    {"name": "Workshop", "prefix": "wk", "heading": "Workshops", "file_stem": "Workshops"}
+  ],
+  "category_rules": [
+    {"field": "form fields", "contains": ["(category) full paper", "(category) resource paper", "(category) perspective"], "paper_type": "Full Paper"},
+    {"field": "form fields", "contains": ["(category) demonstration"], "paper_type": "Demonstration Paper"},
+    {"field": "form fields", "contains": ["(category) short paper"], "paper_type": "Short Paper"},
+    {"field": "track name", "contains_all": ["chiir", "dc"], "paper_type": "Doctoral Consortium"},
+    {"field": "track name", "contains_all": ["chiir", "short"], "paper_type": "Short Paper"},
+    {"field": "track name", "contains": ["tutorial"], "paper_type": "Tutorial"},
+    {"field": "track name", "contains": ["workshop"], "paper_type": "Workshop"},
+    {"field": "track name", "contains_all": ["chiir", "pc"], "paper_type": "Full Paper"}
+  ]
+}
