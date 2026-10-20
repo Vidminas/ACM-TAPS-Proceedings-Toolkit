@@ -1,0 +1,12 @@
+ACM TAPS Proceedings Toolkit
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project includes code derived from sigir-acm-proceedings
+(Copyright (c) 2026 MarwahAlaofi), used under the MIT License; see
+LICENSE-MIT-sigir. Derived files: proceedings/ (models, loader, exporters,
+validation), easychair_export.py, validate_acm_xml.py, scan_referees.py,
+referees_to_docx.py, papers_to_docx.py, affiliations_mapping.json, and the
+tests carried over from that project.
+
+The table-of-contents generator and the eRights CSV column mapping derive from
+the CHIIR 2026 tools by Niall McGuire.
