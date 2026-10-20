@@ -89,4 +89,15 @@ Run the tests with `.venv/bin/python -m pytest tests`. [`docs/how-it-works.md`](
 - **`Missing required columns` from the TOC step.** TAPS column names have changed. Compare the Excel headers with `generate_toc.py`.
 - **TOC page numbers look wrong.** Check `ORDER ID` and `PDFPAGES` in TAPS, then export again.
 
+## Acknowledgements
+
+This toolkit combines and builds on two earlier projects:
+
+- [**acm-proceedings**](https://github.com/MarwahAlaofi/acm-proceedings) by Oleg Zendel and Marwah Khaled Hasan Alaofi (SIGIR proceedings, MIT License; see `LICENSE-MIT-sigir`). It is the source of the validated EasyChair loader, the ACM XML exporter, `validate_acm_xml.py`, the referee scanner and the Word exports.
+- [**ACM-TAPS-Proceedings-Toolkit**](https://github.com/NeuraSearch/ACM-TAPS-Proceedings-Toolkit) by Niall McGuire and Yashar Moshfeghi (CHIIR 2026 proceedings). It is the source of the eRights CSV format, the CHIIR categorisation rules, `generate_toc.py`, the front-matter template and the workflow this README is based on.
+
+Thanks also to Maria Gäde, whose scripts for earlier CHIIR proceedings (EasyChair XML → ACM eRights) informed this work. No code from them is included.
+
+See `NOTICE` for which files derive from which project.
+
 Maintained by the CHIIR Proceedings Chair. For questions about ACM systems (eRights, TAPS, front matter), contact your ACM proceedings coordinator.
