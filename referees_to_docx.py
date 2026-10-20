@@ -18,7 +18,6 @@ extracted (name, affiliation) tuples match the Excel rows exactly, in order.
 """
 
 import argparse
-import re
 import sys
 
 import pandas as pd
@@ -111,32 +110,30 @@ def add_section(doc: Document, heading: str, df: pd.DataFrame) -> None:
         add_entry_runs(para, row)
 
 
-def extract_entries(doc: Document, headings: list[str]) -> list[tuple[str, str]]:
+def extract_entries(doc: Document) -> list[tuple[str, str]]:
     """Re-parse the docx into ``(name, affiliation)`` tuples in document order.
 
-    Used by the verification step to round-trip the generated file. Section
-    headings are stripped from the start of any paragraph that contains them
-    so the leading entry on a heading line is still captured. Empty
-    paragraphs (the blank separator between sections) are skipped.
+    Used by the verification step to round-trip the generated file. Reads the
+    runs written by ``add_entry_runs`` rather than parsing the text, so
+    affiliations that contain parentheses, e.g. "Harbin Institute of
+    Technology (Shenzhen)", survive the round trip. The bold heading run is
+    skipped; the italic run is the affiliation and the upright text before it
+    is the name. Empty paragraphs (the blank separator between sections) are
+    skipped.
     """
     entries = []
-    # Greedy ``.*?`` for the name then a parenthesised affiliation at end-of-line.
-    pattern = re.compile(r"^(.*?)\s*\(([^)]*)\)\s*$")
-
     for para in doc.paragraphs:
-        text = para.text.strip()
-        if not text:
+        runs = [run for run in para.runs if not run.bold]
+        if not "".join(run.text for run in runs).strip():
             continue
 
-        # Strip the heading prefix if present so the inline first entry parses.
-        for heading in sorted(headings, key=len, reverse=True):
-            if text.startswith(heading):
-                text = text[len(heading):].strip()
-                break
-
-        match = pattern.match(text)
-        if match:
-            entries.append((match.group(1).strip(), match.group(2).strip()))
+        italic = [i for i, run in enumerate(runs) if run.italic]
+        if italic:
+            name = "".join(run.text for run in runs[:italic[0]]).strip()
+            name = name.removesuffix("(").strip()
+            entries.append((name, runs[italic[0]].text.strip()))
+        else:
+            entries.append(("".join(run.text for run in runs).strip(), ""))
     return entries
 
 
@@ -153,7 +150,7 @@ def verify_against_excel(doc_path: str, sections: list[tuple[str, pd.DataFrame]]
         for _, df in sections
         for _, row in df.iterrows()
     ]
-    actual = extract_entries(Document(doc_path), [heading for heading, _ in sections])
+    actual = extract_entries(Document(doc_path))
 
     if len(expected) != len(actual):
         raise SystemExit(
