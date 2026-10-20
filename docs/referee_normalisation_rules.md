@@ -1,107 +1,41 @@
-# Referee data normalization — change report
+# Referee data cleanup
 
-Applied automatically by `scan_referees.py` after loading every `.xlsx`
-in the input directory and before any cross-file consistency check or
-merge into `referees.xlsx`.
+The script `scan_referees.py` cleans the committee data. It does this after it reads each `.xlsx` and `.csv` file in the input folder. It cleans the data before it compares the files and before it writes `referees.xlsx`.
 
-The general rules below (whitespace cleanup, capitalization, row/file
-filtering) **always run**. The affiliation substitutions are loaded from
-an external JSON file (`affiliations_mapping.json`) and **only applied
-when `--mappings PATH` is passed on the command line**. Without that
-flag, only the general rules run and affiliation strings pass through
-unchanged.
+The general rules (spaces, capital letters, rows and files) **always** apply. The affiliation replacements come from the file `affiliations_mapping.json`. They apply **only** if you give `--mappings PATH`. Without this option, the script does not change the affiliations.
 
-All substitution lookups are case-insensitive on the trimmed full
-string; non-matching values pass through unchanged.
+The script compares each affiliation with the keys of the mapping file. The comparison uses the full string, without spaces at the start and end. It ignores upper case and lower case. If no key agrees, the affiliation does not change.
 
-## CLI
+## Commands
+
+To do only the general cleanup, use this command:
 
 ```bash
-# General cleanup only (no substitutions)
 python scan_referees.py
+```
 
-# General cleanup + affiliation substitutions from the JSON map
+To do the general cleanup and the affiliation replacements, use this command:
+
+```bash
 python scan_referees.py --mappings affiliations_mapping.json
 ```
 
-The JSON file has shape `{"affiliations": {"<lowercase from>": "<to>", ...}}`.
-Edit it directly to add, remove, or change replacements — no code change
-needed.
+The JSON file has this structure: `{"affiliations": {"<lowercase from>": "<to>", ...}}`. To add, remove or change a replacement, edit this file. It is not necessary to change the code.
 
-## General rules (non-substitution, always applied)
+## General rules
+
+These rules always apply:
 
 | Scope | Rule |
 |---|---|
-| Excel artifacts | Files starting with `~$` (lock files for open workbooks) are skipped. |
-| Empty rows | Rows with no first name, last name, email, or profile are dropped. |
-| Profile column | If `profile` looks like an email and `email` is empty, `email` is filled from `profile`. |
-| Whitespace | Every cell collapses internal whitespace runs (line breaks, tabs, multi-space) into a single space and is `strip()`-ed; pandas `NaN`/`None` becomes `""`. Substitution lookups always see normalized strings, so the keys below never need newline variants. |
-| Name capitalization | First / middle / last name title-cased only when the cell is *entirely* lowercase or *entirely* uppercase. Mixed-case strings (`de Vries`, `McDonald`) are preserved. |
-| Track chairs | Records whose `role` is exactly `track chair` (case-insensitive) are kept for consistency checks but excluded from the merged `referees.xlsx`. |
-| Merged output | Per-sheet rows in `referees.xlsx` are sorted alphabetically by first name, then last name (case-insensitive). |
+| Excel lock files | The script ignores files with names that start with `~$`. Excel makes these files when a workbook is open. |
+| Empty rows | The script removes rows that have no first name, last name, email or profile. |
+| Profile column | If the `profile` column contains an email and the `email` column is empty, the script copies the profile to the `email` column. |
+| Spaces | The script changes each sequence of spaces, tabs and line breaks to one space. It removes spaces at the start and end of each cell. Empty cells (`NaN` or `None`) become `""`. Thus, the mapping keys do not need versions with line breaks. |
+| Capital letters of names | The script changes the first name, middle name and last name to title case only if the cell is fully in lower case or fully in upper case. It does not change names with mixed case, for example `de Vries` or `McDonald`. |
+| Track chairs | The script keeps records with the role `track chair` for the comparisons. It does not write them to `referees.xlsx`. The comparison of the role ignores upper case and lower case. |
+| Merged output | In each sheet of `referees.xlsx`, the rows are in alphabetical sequence by last name, then first name, then affiliation. The sequence ignores upper case and lower case. |
 
-## Affiliation substitutions
+## Affiliation replacements
 
-Sourced from `affiliations_mapping.json`. Applied only when
-`--mappings affiliations_mapping.json` is passed.
-
-| From | To |
-|---|---|
-| `royal melbourne institute of technology` | `RMIT University` |
-| `adobe systems` | `Adobe` |
-| `vody` | `Vody, Inc.` |
-| `nask - national research institute` | `NASK National Research Institute` |
-| `copenhagen university` | `University of Copenhagen` |
-| `shanghai jiaotong university` | `Shanghai Jiao Tong University` |
-| `aampe` | `Aampe` |
-| `technion` | `Technion - Israel Institute of Technology` |
-| `technion, israel institute of technology` | `Technion - Israel Institute of Technology` |
-| `department of mechanical and industrial engineering, university of toronto` | `University of Toronto` |
-| `gesis-leibniz institute for the social sciences` | `GESIS – Leibniz Institute for the Social Sciences` |
-| `national institute of informatics` | `National Institute of Informatics (NII)` |
-| `nii` | `National Institute of Informatics (NII)` |
-| `universidade federal de minas gerais, universidade federal de minas gerais` | `Universidade Federal de Minas Gerais` |
-| `friedrich-schiller universität jena` | `Friedrich-Schiller-Universität Jena` |
-| `mst` | `Missouri University of Science and Technology` |
-| `service australia` | `Services Australia` |
-| `university of stavanger and google deepmind` | `University of Stavanger & Google DeepMind` |
-| `saarland university of applied sciences` | `Saarland University of Applied Sciences (htw saar)` |
-| `uned` | `Universidad Nacional de Educación a Distancia` |
-| `university de montreal` | `University of Montreal` |
-| `city st george's, university of london uk` | `City St George's, University of London` |
-| `university of passau` | `Universität Passau` |
-| `institut de recherche en informatique de toulouse` | `Institut de Recherche en Informatique de Toulouse (IRIT)` |
-| `irit` | `Institut de Recherche en Informatique de Toulouse (IRIT)` |
-| `university of tübingen` | `Eberhard-Karls-Universität Tübingen` |
-| `university of massachusetts at amherst` | `University of Massachusetts Amherst` |
-| `university of milano-bicocca` | `University of Milano - Bicocca` |
-| `university of milano bicocca` | `University of Milano - Bicocca` |
-| `university of milan - bicocca` | `University of Milano - Bicocca` |
-| `university of rome` | `Sapienza University of Rome` |
-| `laboratoire informatique d'avignon- université d'avignon` | `Avignon Université` |
-| `university of california santa cruz` | `University of California, Santa Cruz` |
-| `universidad de la coruña` | `Universidade da Coruña` |
-| `universidad da coruña` | `Universidade da Coruña` |
-| `it polytechnic university of bari` | `Polytechnic University of Bari` |
-| `polytechnic institute of bari` | `Polytechnic University of Bari` |
-| `th mittelhessen - university of applied sciences & herder institute for historical research on east central europe` | `TH Mittelhessen & Herder Institute for Historical Research on East Central Europe` |
-| `cmu, carnegie mellon university` | `Carnegie Mellon University` |
-| `department of informatics, national and kapodistrian university of athens` | `National and Kapodistrian University of Athens` |
-| `dept. of informatics and telecommunications, national and kapodistrian university of athens` | `National and Kapodistrian University of Athens` |
-| `technische universität wien` | `TU Wien` |
-| `university of innsbruck` | `Universität Innsbruck` |
-| `indian institute of science education and research, kolkata` | `IISER Kolkata` |
-| `indian institute of science education and research (iiser) kolkata, india` | `Indian Institute of Science Education and Research (IISER) Kolkata` |
-| `university of padua` | `Università degli Studi di Padova` |
-| `universita' degli studi di padova` | `Università degli Studi di Padova` |
-| `university grenoble alpes` | `Université Grenoble Alpes` |
-| `radboud university and spinque` | `Radboud University & Spinque` |
-| `inesc tec and faculty of engineering, university of porto` | `Universidade do Porto` |
-| `tongji university, shanghai, china` | `Tongji University` |
-| `computer science and systems laboratory, aix-marseille university` | `Aix-Marseille University` |
-| `department of information and electronic engineering, international hellenic university` | `International Hellenic University` |
-| `mixedbread and national institute of informtics (nii)` | `Mixedbread and National Institute of Informatics (NII)` |
-| `university of illinois at urbana-champaign` | `University of Illinois Urbana-Champaign` |
-| `universita della svizzera italiana` | `Università della Svizzera Italiana (USI)` |
-| `università della svizzera italiana` | `Università della Svizzera Italiana (USI)` |
-| `università della svizzera italiana, usi` | `Università della Svizzera Italiana (USI)` |
+The list of replacements is in `affiliations_mapping.json`. For the rules of its entries, see [affiliations_mapping_rules.md](affiliations_mapping_rules.md).

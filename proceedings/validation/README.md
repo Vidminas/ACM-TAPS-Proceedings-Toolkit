@@ -1,1110 +1,191 @@
-# Validation Package
+# Validation package
 
-This package provides comprehensive validation and analysis tools for ACM XML files, including data quality checks, affiliation similarity detection, and statistical analysis.
+This package analyzes ACM XML files. It finds problems in the data, finds similar affiliation names, finds authors with more than one identity and calculates statistics. The script `validate_acm_xml.py` uses this package.
 
-## Key Assumptions (TL;DR)
+## Summary of the rules
 
-**Author Field Completion:**
-- **Purpose**: Fill missing information for authors appearing in multiple papers
-- **Uses author merging**: Identifies same person via email/name matching
-- **Only fills empty fields**: Never overwrites existing values (preserves multi-affiliation scenarios)
-- **Fields completed**: Affiliations, countries, departments
-- **CLI**: `python validate_acm_xml.py file.xml --complete-fields`
+- **Field completion:** If an author has more than one paper, the package fills empty fields from the other papers. It never replaces a value that is not empty.
+- **Author identity:** The same email (upper case and lower case ignored) identifies one person. The same full name also identifies one person if one or more of the records has no email. The same name with two different emails identifies **two** persons.
+- **Similar affiliations:** The package uses three steps: known aliases, then email domains, then string similarity.
+- **Countries:** The package uses the `pycountry` library to change country codes and abbreviations to full names.
+- **Statistics:** The package merges the identities of each author before it counts. Thus, it counts each person one time.
 
-**Author Identity Merging:**
-- **Primary signal**: Exact email match (case-insensitive) → same author
-- **Secondary signal**: Exact full name match + at least one missing email → same author
-- **Important**: Same name + different non-empty emails → NOT merged (likely different people)
-- **Purpose**: Prevent counting same person multiple times while avoiding false positives
-- **See flowchart in [Algorithm Details](#algorithm-details) section below**
+## Commands
 
-**Affiliation Similarity Detection:**
-- **Primary signal**: Institutional email domains (@university.edu)
-- **Excluded**: Public email services (gmail.com, yahoo.com, hotmail.com, acm.org, etc.)
-- **Normalization**: Student/staff subdomains treated as equivalent (student.X.edu → X.edu)
-- **Three-tier matching**: Known aliases → Email domain → String similarity
-- **False positive prevention**: Matching email domains must pass basic similarity check
-- **See flowchart in [Algorithm Details](#algorithm-details) section below**
+| Task | Command |
+|---|---|
+| Examine one XML file | `python validate_acm_xml.py chiir2027.xml` |
+| Write reports to files | `python validate_acm_xml.py chiir2027.xml --output chiir2027_report` |
+| Show the top 10 items in each list | `python validate_acm_xml.py chiir2027.xml --top_k 10` |
+| Show all items in each list | `python validate_acm_xml.py chiir2027.xml --top_k full` |
+| Examine more than one file, with combined statistics | `python validate_acm_xml.py full.xml short.xml demo.xml --output combined` |
+| Look at the statistics interactively | `python validate_acm_xml.py chiir2027.xml --interactive` |
+| Fill empty author fields in the file | `python validate_acm_xml.py chiir2027.xml --complete-fields` |
+| Fill empty author fields and write a new file | `python validate_acm_xml.py chiir2027.xml --complete-fields --complete-output completed.xml` |
 
-**Country Normalization:**
-- Uses `pycountry` library for standardization
-- Converts ISO codes to full names (US → United States, CN → China)
-- Handles abbreviations (U.S., U.K., U.A.E.)
+**CAUTION:** Without `--complete-output`, `--complete-fields` changes the input file. Keep a copy of the file before you use this option.
 
-**Statistics:**
-- Authors merged before counting (prevents double-counting same person)
-- Tracks both author counts AND unique paper counts per affiliation/country
-- Multi-file aggregation: author counts sum, paper IDs deduplicate
+The `--output PREFIX` option writes these files:
 
-## Table of Contents
+- `PREFIX_validation.txt`: the problems in the data and the validation result
+- `PREFIX_statistics.txt`: the statistics, in tables
+- `PREFIX_similar_affiliations.txt`: the groups of similar affiliations
+- `PREFIX_merged_authors.txt`: the authors with more than one identity
 
-- [Quick Start](#quick-start)
-- [Module Overview](#module-overview)
-- [Usage Examples](#usage-examples)
-- [Assumptions and Design Decisions](#assumptions-and-design-decisions)
-- [Algorithm Details](#algorithm-details)
-- [Configuration](#configuration)
+The `--output` option needs the `tabulate` library.
 
-## Quick Start
+## Modules
 
-**Command-line validation (most common usage):**
+| Module | Contents |
+|---|---|
+| `checks.py` | Author identity (`merge_author_identities`, `find_merged_authors`), field completion (`complete_author_fields`), checks of names and emails (`check_name_capitalization`, `check_email_name_consistency`), similar affiliations (`find_similar_affiliations`, `merge_similar_affiliation_counts`) and functions that print the results |
+| `statistics.py` | `generate_statistics`, `print_statistics`, `normalize_country_name`, `calculate_author_score` |
+| `aggregation.py` | `merge_statistics` and `merge_quality_stats` combine the results of more than one file |
 
-```bash
-# Validate single XML file
-python validate_acm_xml.py sigir2026.xml
-
-# Generate formatted reports (creates 3 files: validation, statistics, similar affiliations)
-python validate_acm_xml.py sigir2026.xml --output sigir2026_report
-
-# Control top-k items in statistics (default: 20)
-python validate_acm_xml.py sigir2026.xml --output report --top_k 10
-python validate_acm_xml.py sigir2026.xml --output report --top_k full  # Show all items
-
-# Validate multiple XML files with aggregated statistics
-python validate_acm_xml.py full.xml short.xml demo.xml --output combined
-
-# Complete missing author fields (fills gaps across papers)
-python validate_acm_xml.py proceedings.xml --complete-fields
-python validate_acm_xml.py proceedings.xml --complete-fields --complete-output proceedings_completed.xml
-```
-
-**Output files** (when using `--output prefix`):
-- `prefix_validation.txt` - Data quality issues and validation status
-- `prefix_statistics.txt` - Comprehensive statistics with formatted tables
-- `prefix_similar_affiliations.txt` - Detailed affiliation similarity groups
-
-**Programmatic usage:**
-
-```python
-from proceedings.validation import (
-    check_name_capitalization,
-    check_email_name_consistency,
-    find_similar_affiliations,
-    generate_statistics,
-    print_statistics
-)
-
-# Load and parse XML
-tree = ET.parse('proceedings.xml')
-root = tree.getroot()
-
-# Run validation checks
-name_issues = check_name_capitalization(root)
-email_issues = check_email_name_consistency(root)
-similar_groups = find_similar_affiliations(root)
-
-# Generate and print statistics
-stats = generate_statistics(root)
-print_statistics(stats, root=root, top_k=20)
-```
-
-## Module Overview
-
-### Structure
-
-```
-validation/
-├── __init__.py         # Package initialization and exports
-├── checks.py           # Author name, email, and affiliation validation
-├── aggregation.py      # Multi-file statistics merging
-├── statistics.py       # Statistics generation and reporting
-└── README.md          # This file
-```
-
-### checks.py
-
-**Author identity functions:**
-
-- `merge_author_identities(author_keys)` - Merges duplicate author identities (email match → name match)
-- `complete_author_fields(root)` - Completes missing author fields across papers for same author
-
-**Data quality validation functions:**
-
-- `check_name_capitalization(root)` - Validates first/last names start with capitals
-- `check_email_name_consistency(root)` - Detects same email with different names
-- `find_similar_affiliations(root)` - Three-tier affiliation matching (aliases → email domain → string similarity)
-- `merge_similar_affiliation_counts(stats, similar_groups)` - Merges counts for similar affiliations
-
-**Output formatting functions:**
-
-- `print_name_capitalization_issues(issues)` - Formats name capitalization problems
-- `print_email_name_consistency_issues(issues)` - Formats email-name inconsistencies
-- `print_similar_affiliations(similar_groups)` - Formats affiliation similarity groups
-
-**Configuration:**
-
-- `INSTITUTION_ALIASES` - Whitelist of known institution name variations
-- `INSTITUTION_BLACKLIST` - Blacklist of institutions that should never merge
-- `normalize_email_domain(domain)` - Treats institutional subdomains as equivalent
-
-### aggregation.py
-
-**Multi-file statistics merging:**
-
-- `merge_statistics(stats_list)` - Merges statistics from multiple XML files
-  - Author counts sum across files
-  - Paper IDs deduplicate (same paper in multiple files counted once)
-- `merge_quality_stats(quality_list)` - Merges data quality statistics from multiple files
-
-### statistics.py
-
-**Statistics generation and reporting:**
-
-- `generate_statistics(root)` - Generates comprehensive statistics from single XML file
-  - **Automatically merges duplicate author identities** (email match → name match)
-  - Papers per track/type with author counts
-  - Author counts and unique paper counts per author (using merged identities)
-  - Affiliation and country distributions (using merged identities)
-  - Prolific authors (most papers, counted by merged identity)
-  
-- `print_statistics(stats, root=None, top_k=20)` - Prints formatted statistics
-  - Optionally includes merged affiliation statistics when root provided
-  - Controls number of items shown with top_k parameter
-
-**Author scoring:**
-
-- `calculate_author_score(papers)` - Weighted score based on paper types
-- `get_scoring_description()` - Human-readable scoring description
-
-**Country normalization:**
-
-- `normalize_country_name(country_str)` - Uses pycountry for standardization
-- Converts ISO codes (US, USA, CHN) to full names
-- Handles abbreviations with periods (U.S., U.K., U.A.E.)
-- Maps official names to common names (Korea, Republic of → South Korea)
-
-## Usage Examples
-
-### Example 1: Basic Validation
+## Use from Python
 
 ```python
 import xml.etree.ElementTree as ET
 from proceedings.validation import (
-    check_name_capitalization,
-    check_email_name_consistency,
-    find_similar_affiliations
+    check_email_name_consistency, check_name_capitalization, complete_author_fields,
+    find_similar_affiliations, generate_statistics, merge_statistics, print_statistics,
 )
 
-# Parse XML
-tree = ET.parse('proceedings.xml')
+tree = ET.parse("chiir2027.xml")
 root = tree.getroot()
 
-# Check for name capitalization issues
-name_issues = check_name_capitalization(root)
-if name_issues:
-    print(f"Found {len(name_issues)} papers with name capitalization issues")
-    for paper_id, authors in name_issues.items():
-        print(f"  Paper {paper_id}: {len(authors)} authors with issues")
+name_issues = check_name_capitalization(root)       # [{"paper_id", "author_name", "field", "issue", ...}]
+email_issues = check_email_name_consistency(root)   # emails used with different names
+groups = find_similar_affiliations(root)            # [{"affiliations": [...], "match_type": ...}]
 
-# Check email-name consistency
-email_issues = check_email_name_consistency(root)
-if email_issues:
-    print(f"Found {len(email_issues)} emails with inconsistent names")
-
-# Find similar affiliations
-similar_groups = find_similar_affiliations(root)
-if similar_groups:
-    print(f"Found {len(similar_groups)} groups of similar affiliations")
-```
-
-### Example 2: Statistics with Merged Affiliations
-
-```python
-import xml.etree.ElementTree as ET
-from proceedings.validation import generate_statistics, print_statistics
-
-# Parse XML
-tree = ET.parse('proceedings.xml')
-root = tree.getroot()
-
-# Generate statistics (includes merged affiliation analysis)
 stats = generate_statistics(root)
+print_statistics(stats, root=root)                  # root adds the merged affiliation counts
 
-# Print with merged affiliations, showing top 15 items
-print_statistics(stats, root=root, top_k=15)
+# Combine the statistics of more than one file
+combined = merge_statistics([generate_statistics(ET.parse(f).getroot())
+                             for f in ["full.xml", "short.xml"]])
 
-# Or show all items (sorted)
-print_statistics(stats, root=root, top_k="full")
+# Fill empty fields, then write a new file
+counts = complete_author_fields(root)  # affiliations_added, countries_added, departments_added
+tree.write("completed.xml", encoding="utf-8", xml_declaration=True)
 ```
 
-### Example 3: Multi-File Aggregation
+## Field completion
 
-```python
-import xml.etree.ElementTree as ET
-from proceedings.validation import generate_statistics, merge_statistics
+Some authors have more than one paper. Their data can be complete in one paper and incomplete in a different paper. The function `complete_author_fields()` fills the empty fields. It does these steps:
 
-# Parse multiple files
-files = ['full_papers.xml', 'short_papers.xml', 'demo_papers.xml']
-stats_list = []
+1. It identifies each person with `merge_author_identities()`.
+2. It collects the affiliations of each person from all papers.
+3. If an author record has no affiliation, it adds all known affiliations of that person. It merges the known values of each institution, so that a department or country that is not empty has priority.
+4. If an author record has an affiliation, it fills only an empty department or country of the same institution.
 
-for filename in files:
-    tree = ET.parse(filename)
-    root = tree.getroot()
-    stats = generate_statistics(root)
-    stats_list.append(stats)
+The function puts each new affiliation in the `<affiliations>` element, as the ACM XML format requires.
 
-# Merge statistics across all files
-combined = merge_statistics(stats_list)
+The function **never** replaces a value that is not empty. An author can change institution, department or country between papers.
 
-# Access aggregated data
-total_papers = sum(combined['papers_by_track'].values())
-total_authors = sum(combined['authors'].values())
-print(f"Total: {total_papers} papers, {total_authors} author entries")
-```
+Examples:
 
-### Example 4: Author Field Completion
-
-```python
-import xml.etree.ElementTree as ET
-from proceedings.validation import complete_author_fields
-
-# Parse XML
-tree = ET.parse('proceedings.xml')
-root = tree.getroot()
-
-# Complete missing fields
-stats = complete_author_fields(root)
-
-# Print statistics
-print(f"Authors processed: {stats['authors_processed']}")
-print(f"Affiliations added: {stats['affiliations_added']}")
-print(f"Countries added: {stats['countries_added']}")
-print(f"Departments added: {stats['departments_added']}")
-
-# Save modified XML
-tree.write('proceedings_completed.xml', encoding='utf-8', xml_declaration=True)
-```
-
-### Example 5: Author Identity Merging
-
-```python
-import xml.etree.ElementTree as ET
-from proceedings.validation import merge_author_identities
-
-# Parse XML
-tree = ET.parse('proceedings.xml')
-root = tree.getroot()
-
-# Collect all author keys
-author_keys = set()
-for paper in root.findall("paper"):
-    for author in paper.findall(".//author"):
-        first = author.findtext("first_name", "")
-        last = author.findtext("last_name", "")
-        email = author.findtext("email_address", "")
-        author_keys.add((first, last, email))
-
-# Build canonical mapping
-canonical_map = merge_author_identities(author_keys)
-
-# Analyze merging
-unique_authors = set(canonical_map.values())
-print(f"Original author entries: {len(author_keys)}")
-print(f"Unique authors after merging: {len(unique_authors)}")
-print(f"Duplicates removed: {len(author_keys) - len(unique_authors)}")
-
-# Find authors with multiple identities
-identity_groups = {}
-for author_key, canonical in canonical_map.items():
-    if canonical not in identity_groups:
-        identity_groups[canonical] = []
-    identity_groups[canonical].append(author_key)
-
-print("\nAuthors with multiple identities:")
-for canonical, identities in identity_groups.items():
-    if len(identities) > 1:
-        print(f"\n{canonical[0]} {canonical[1]} (canonical email: {canonical[2]})")
-        for first, last, email in identities:
-            if (first, last, email) != canonical:
-                print(f"  → Also appears as: {first} {last} ({email if email else 'no email'})")
-```
-
-### Example 6: Custom Affiliation Analysis
-
-```python
-import xml.etree.ElementTree as ET
-from proceedings.validation import find_similar_affiliations
-
-# Parse XML
-tree = ET.parse('proceedings.xml')
-root = tree.getroot()
-
-# Get similar affiliation groups with match type information
-similar_groups = find_similar_affiliations(root)
-
-# Analyze groups by match type
-for group in similar_groups:
-    affiliations = group['affiliations']
-    match_type = group.get('match_type', 'string_similarity')
-    
-    print(f"\nMatch Type: {match_type}")
-    print(f"Group Size: {len(affiliations)} variations")
-    
-    if match_type == 'known_alias':
-        print("  → High confidence (whitelisted institution)")
-    elif match_type == 'email_domain':
-        email_domain = group.get('email_domain', 'N/A')
-        print(f"  → Email domain: @{email_domain}")
-    elif match_type == 'string_similarity':
-        print("  → Based on string similarity and distinctive tokens")
-    
-    for aff in affiliations:
-        print(f"  - {aff}")
-```
-
-## Assumptions and Design Decisions
-
-### Author Field Completion
-
-**Core assumption:**
-Authors appearing in multiple papers may have complete information in some papers but missing information in others. Field completion fills these gaps while preserving legitimate multi-affiliation scenarios.
-
-**Completion Rules:**
-
-1. **Identify same authors** using `merge_author_identities()` (email match → name match)
-2. **Collect all information** for each canonical author across all papers
-3. **Fill missing fields only** - never overwrite existing values
-4. **Handle multiple affiliations** - authors can have different affiliations across papers
-
-**What gets completed:**
-- **Affiliations**: If completely missing, adds all known affiliations from other papers
-- **Countries**: Within existing affiliation, fills missing country if known from other papers
-- **Departments**: Within existing affiliation, fills missing department if known from other papers
-
-**What is NOT overwritten:**
-- **Existing affiliations**: Never replaced (author may have changed institutions)
-- **Existing countries**: Never replaced (author may have relocated)
-- **Existing departments**: Never replaced (author may have changed departments)
-
-**Examples:**
-
-**Scenario 1: Missing country**
 ```
 Paper 1: John Smith (john@mit.edu), MIT, Computer Science, United States
 Paper 2: John Smith (john@mit.edu), MIT, Computer Science, [empty]
+Result:  Paper 2 gets "United States".
 
-After completion:
-Paper 2: John Smith (john@mit.edu), MIT, Computer Science, United States ← Filled
-```
-
-**Scenario 2: Missing affiliation**
-```
-Paper 1: John Smith (john@mit.edu), MIT, USA
-Paper 2: John Smith (john@mit.edu), [no affiliation]
-
-After completion:
-Paper 2: John Smith (john@mit.edu), MIT, USA ← Filled
-```
-
-**Scenario 3: Multiple affiliations (NOT completed)**
-```
 Paper 1: John Smith (john@mit.edu), MIT, USA
 Paper 2: John Smith (john@mit.edu), Stanford, USA
-
-After completion:
-Paper 1: John Smith (john@mit.edu), MIT, USA ← Unchanged
-Paper 2: John Smith (john@mit.edu), Stanford, USA ← Unchanged (legitimate change)
+Result:  No change. The two affiliations are correct.
 ```
 
-**Scenario 4: Partial information**
-```
-Paper 1: John Smith (john@mit.edu), MIT, Computer Science, United States
-Paper 2: John Smith (john@mit.edu), MIT, [no dept], [no country]
+Do not use field completion if you must keep the export exactly as it is.
 
-After completion:
-Paper 2: John Smith (john@mit.edu), MIT, Computer Science, United States ← Dept and country filled
-```
+## Author identity
 
-**When to use:**
-- After exporting from conference system (OpenReview, EasyChair)
-- Before submitting to ACM (ensures complete author information)
-- When consolidating data from multiple sources
+The same person can occur more than one time in the data, with different emails, with no email, or with a different form of the name. The function `merge_author_identities()` merges these records in two steps:
 
-**When NOT to use:**
-- If all papers already have complete information (no-op)
-- If you want to preserve exactly what was in the export (no modifications)
+1. **Same email.** All records with the same email (upper case and lower case ignored) are one person. The names can be different, for example `John Smith` and `J. Smith`.
+2. **Same full name and an empty email.** The function examines the records that remain. Records with the same first name and last name are one person if one or more of them has no email. The comparison of names is exact.
 
-### Author Identity Merging
+These records are **not** merged:
 
-**Core assumption:**
-The same person may appear multiple times in proceedings data with:
-- Different email addresses (institutional vs personal, email changed between papers)
-- Missing email addresses (some papers have email, others don't)
-- Name variations (full name vs initials, typos)
+- The same name with two different emails that are not empty, for example `Jane Doe <jane@stanford.edu>` and `Jane Doe <jane@berkeley.edu>`. These are probably two persons.
+- Similar names that are not the same, for example `John Smith` and `Jon Smith`. The function does not use approximate matches, because these can give incorrect merges.
 
-**Merging Rules (Priority Order):**
+The function selects one record of each group as the canonical record. It prefers a record that has an email. If there is more than one such record, it selects the first record in alphabetical sequence. Thus, the result is always the same.
 
-1. **Exact email match (highest confidence)**
-   - Same email address (case-insensitive) → same person
-   - Comparison: john@mit.edu = JOHN@MIT.EDU = John@MIT.edu
-   - Handles name variations when email is the same
-   - Example: ("John Smith", "john@mit.edu") + ("J. Smith", "john@mit.edu") → merged
+After the merge, the statistics count each paper only one time for each person.
 
-2. **Exact full name match with missing email (medium confidence)**
-   - Same first + last name + at least one has missing email → same person
-   - Only applies to authors not merged in Step 1
-   - Example: ("John Smith", "john@mit.edu") + ("John Smith", "") → merged
-   - Example: ("Bob Brown", "") + ("Bob Brown", "") → merged
-   - **Important**: Same name + different emails → NOT merged (likely different people)
-   - Example: ("Jane Doe", "jane@stanford.edu") + ("Jane Doe", "jane@berkeley.edu") → NOT merged
+## Checks of names and emails
 
-**Why this design:**
+- `check_name_capitalization()` finds first names and last names with a first character that is not an upper-case letter. It ignores empty names.
 
-- **Email is more reliable than name**: Institutional emails are unique identifiers, names can be shared
-- **Progressive merging**: High-confidence signals first, then lower-confidence
-- **Conservative approach**: Only merges when clear evidence of same person
-- **Handles real-world data**: Email changes, missing data, inconsistent entry
+  **NOTE:** Some scripts, for example Chinese, have no capital letters. Names in these scripts also show as problems. Ignore these results.
+- `check_email_name_consistency()` finds emails that occur with two or more different names. It ignores empty emails. It compares the full names exactly.
 
-**Edge cases handled:**
+## Similar affiliations
 
-- **Same name, different people**: If they have different emails, treated as different people (email merged separately in Step 1)
-- **Same email, different names**: Merged as same person (email is stronger signal, name might have typo)
-- **Missing emails**: Merged by name only if not already merged by email with someone else
-- **Empty strings**: Treated as missing (not used for matching)
+The same institution can occur with different capital letters, punctuation, abbreviations or extra words. For example: `RMIT University` and `Royal Melbourne Institute of Technology`, or `University of Melbourne` and `The University of Melbourne`.
 
-**What is NOT merged:**
+The function `find_similar_affiliations()` makes groups of similar affiliations in three steps. Each affiliation goes into one group only.
 
-- **Different names, different emails**: Clearly different people
-- **Same name, different non-empty emails**: Likely different people
-  - Example: ("Jane Doe", "jane@stanford.edu") vs ("Jane Doe", "jane@berkeley.edu") → NOT merged
-  - Rationale: Different institutional emails suggest different individuals
-- **Similar but not exact names**: "John Smith" ≠ "Jon Smith" (no fuzzy matching to avoid false positives)
+1. **Known aliases.** The function compares each affiliation with the lists in `INSTITUTION_ALIASES`. If two or more affiliations are aliases of the same institution, they become one group (`match_type="known_alias"`).
+2. **Same email domain.** The function collects the email domains of the authors of each affiliation. It ignores public email services (`PUBLIC_DOMAINS`, for example `gmail.com`, `qq.com` and `acm.org`). It removes subdomains such as `student.`, `mail.` and `staff.`. Two affiliations with the same domain become one group (`match_type="email_domain"`) if one of these conditions is true:
+   - They are known aliases.
+   - They have one or more distinctive words that are the same.
+   - Their string similarity is 0.4 or more.
+3. **String similarity.** The function compares the affiliations that remain. Two affiliations become one group (`match_type="string_similarity"`) if all these conditions are true:
+   - The shorter name has at least half the length of the longer name.
+   - Their string similarity is equal to or more than `similarity_threshold` (default 0.8).
+   - Their distinctive words overlap by 0.3 or more, or their string similarity is 0.9 or more.
 
-### Name Validation
+In all steps, the function never merges two affiliations that are in `INSTITUTION_BLACKLIST`.
 
-**Assumptions:**
-- First names and last names should start with capital letters
-- Middle names/initials may be optional or missing
-- Non-Latin scripts are not validated (capitalization rules vary)
+**Distinctive words** are the words of the affiliation (in lower case, without punctuation) that are not general words. These are the general words: the, university, of, college, institute, institution, school, academy, technology, science, sciences, research, center, centre, laboratory, lab, department, dept, faculty, and. If no word remains, the function uses the first word. Distinctive words prevent incorrect groups, for example `Dalian University of Technology` and `Delft University of Technology`.
 
-**Edge cases handled:**
-- Names with hyphens, apostrophes, or spaces are allowed
-- Single-letter names are allowed (e.g., middle initials)
-- Empty names are flagged but not considered capitalization issues
+**String similarity** is the ratio from Python `difflib.SequenceMatcher`. The value is between 0 and 1, where 1 means that the strings are the same.
 
-### Email Validation
+**Why the email domain is important:** Authors of one institution usually have the same email domain. For example, `@rmit.edu.au` identifies RMIT University. The check of words or similarity in step 2 prevents incorrect groups when an author gives an incorrect email domain.
 
-**Assumptions:**
-- Same email address should always be associated with the same author name
-- Email addresses are case-insensitive for comparison
-- Empty emails are allowed (will be flagged in data quality report)
+For the statistics, the function `choose_representative_affiliation()` selects one name for each group. It prefers short names, names without a department prefix, and then the first name in alphabetical sequence.
 
-**Design decisions:**
-- Only flags inconsistencies where the email is non-empty
-- Compares full name strings (first + middle + last)
-- Does not attempt to normalize name variations (e.g., "John Smith" vs "J. Smith")
+## Countries
 
-### Affiliation Similarity Detection
+The function `normalize_country_name()` changes country data to a full country name. It accepts these forms:
 
-**Core assumption:**
-Academic institutions often appear with variations in proceedings data due to:
-- Capitalization differences (RMIT vs Rmit vs rmit)
-- Punctuation differences (JD.com vs JD.COM vs jd.com)
-- Abbreviation vs full name (RMIT University vs Royal Melbourne Institute of Technology)
-- Extra words (University of Melbourne vs The University of Melbourne)
-- Language/translation variations (Tsinghua University vs 清华大学)
+- Full names, for example `United States`
+- ISO 3166-1 codes with two or three letters, for example `US`, `GB`, `USA`, `CHN`
+- Abbreviations with periods, for example `U.S.`, `U.K.`, `U.A.E.`
+- Usual alternative names
 
-**Key Signal: Email Domains**
+It uses `pycountry` for the official names. Then it changes some official names to their usual names, for example `Korea, Republic of` → `South Korea` and `Russian Federation` → `Russia` (`name_overrides` in `statistics.py`). If it cannot identify a country, it keeps the original text.
 
-The algorithm uses **institutional email domains as the primary signal** for affiliation similarity:
+## Statistics
 
-- **Assumption**: Authors from the same institution typically share the same email domain
-  - Example: @rmit.edu.au indicates RMIT University
-  - Example: @tsinghua.edu.cn indicates Tsinghua University
+`generate_statistics()` merges the author identities first. Then it counts:
 
-- **Domain normalization**: Student/staff subdomains are treated as equivalent
-  - student.rmit.edu.au → rmit.edu.au
-  - mail.tsinghua.edu.cn → tsinghua.edu.cn
-  
-- **Exclusions**: Public and generic email services are ignored
-  - gmail.com, yahoo.com, hotmail.com (consumer services)
-  - acm.org (generic email service for ACM members, unrelated to affiliation)
-  - See `PUBLIC_DOMAINS` set in checks.py for full list
+- Papers for each track and paper type
+- Papers for each author
+- Authors and papers for each affiliation and each country
+- The authors with the most papers
 
-- **False positive prevention**: Even with matching email domains, affiliations are only merged if they pass a basic similarity check (shared tokens OR string similarity >= 0.4)
-  - Prevents merging when email domain is incorrectly entered in data
+For each affiliation and country, the statistics give two numbers:
 
-**Three-tier matching priority:**
+- **Author count:** the number of author records. An author with three papers counts three times.
+- **Paper count:** the number of different papers.
 
-1. **Known aliases (highest confidence)**
-   - Use predefined whitelist of institution name variations
-   - Example: "RMIT University" and "Royal Melbourne Institute of Technology" are known aliases
-   - Canonical name selected as merge target
+The ratio of the two numbers shows the size of the teams.
 
-2. **Exact email domain match (high confidence)**
-   - Primary signal for affiliation similarity
-   - Email domains are normalized (student.rmit.edu.au → rmit.edu.au)
-   - Requires basic similarity check to prevent false positives from data quality issues
-   - Example: All authors with @rmit.edu.au are likely from RMIT University
+When you combine more than one file, the author counts are added. Each paper counts one time only, also if it occurs in more than one file.
 
-3. **String similarity (medium confidence)**
-   - Fallback for affiliations without email domain or not in whitelist
-   - Uses distinctive token matching + Levenshtein similarity
-   - Requires both token overlap AND high similarity score
-   - Example: "Tsinghua Univ" and "Tsinghua University" are similar
-
-**Why this design:**
-- Prevents false positives (RMIT and University of Melbourne have different email domains)
-- Handles data quality issues (author lists wrong email domain for affiliation)
-- Balances precision and recall (known aliases have 100% confidence, string matching lower)
-- Extensible (easy to add new aliases or blacklist entries)
-
-### Country Normalization
-
-**Assumptions:**
-- Country names in XML may be:
-  - Full names (United States, United Kingdom)
-  - ISO 3166-1 alpha-2 codes (US, GB, CN)
-  - ISO 3166-1 alpha-3 codes (USA, GBR, CHN)
-  - Abbreviations with periods (U.S., U.K., U.A.E.)
-  - Common variations (America, England, Mainland China)
-
-**Design decisions:**
-- Uses `pycountry` library as authoritative source
-- Normalizes all variations to official ISO country names
-- Maps official names to common names where appropriate (e.g., "Korea, Republic of" → "South Korea")
-- Case-insensitive matching (US = us = Us)
-- Special handling for territories (Taiwan, Hong Kong, Macao)
-
-**Edge cases:**
-- Unknown country names are preserved as-is (not normalized)
-- Empty or None values are preserved
-- Multiple matches prefer shortest official name
-
-### Statistics Generation
-
-**Author counts vs paper counts:**
-
-**Design decision:** Track both metrics to reveal collaboration patterns
-
-- **Author count**: Total number of author entries (can include duplicates across papers)
-  - Example: Author appears on 3 papers → count = 3
-  
-- **Paper count**: Unique papers per affiliation/country using set deduplication
-  - Example: 45 authors on 3 papers from same institution → 45 authors, 3 papers
-  
-**Why both metrics:**
-- Author count reveals size of contributor base
-- Paper count reveals publication volume
-- Ratio reveals team sizes (high author/paper ratio = large collaborative teams)
-
-**Multi-file aggregation:**
-- Author counts sum across files (additive metric)
-- Paper IDs deduplicate across files (same paper in multiple files counted once)
-- Prevents double-counting when same paper appears in multiple exports
-
-## Algorithm Details
-
-### Author Identity Merging - Flowchart
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ INPUT: All unique author keys (first_name, last_name, email)   │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ STEP 1: Group by Email (Highest Confidence)                        │
-│ For each non-empty, non-null email:                               │
-│   • Normalize email to lowercase                                   │
-│   • Group all authors with same email                             │
-│   • Choose canonical author (deterministic sort by name)          │
-│   • Map all variants → canonical                                   │
-│                                                                     │
-│ Example:                                                            │
-│ • ("John", "Smith", "john@mit.edu") ← canonical                    │
-│ • ("John", "Smith", "JOHN@MIT.EDU") → same as above               │
-│ • ("J", "Smith", "john@mit.edu") → same as above                  │
-│ • All three merged because email matches ✓                         │
-│                                                                     │
-│ Rationale:                                                          │
-│ • Same email = same person (institutional email rarely shared)     │
-│ • Handles name variations (initials, typos, case)                 │
-│ • Case-insensitive email matching                                  │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ STEP 2: Group by Full Name (Medium Confidence)                     │
-│ For remaining authors not merged by email:                         │
-│   • Build full_name = "first_name last_name" (stripped)           │
-│   • Group authors with same full name                              │
-│   • Check if at least one author has missing email:               │
-│     - YES: Merge them (choose canonical with email if available)  │
-│     - NO: Don't merge (different emails = likely different people)│
-│   • Map merged variants → canonical                                │
-│                                                                     │
-│ Example (MERGE - missing email):                                   │
-│ • ("Alice", "Johnson", "alice@cmu.edu") ← canonical (has email)   │
-│ • ("Alice", "Johnson", "") → merged                               │
-│                                                                     │
-│ Example (MERGE - both missing):                                    │
-│ • ("Bob", "Brown", "") ← canonical                                │
-│ • ("Bob", "Brown", "") → merged                                   │
-│                                                                     │
-│ Example (DON'T MERGE - different emails):                          │
-│ • ("Jane", "Doe", "jane@stanford.edu") → NOT merged               │
-│ • ("Jane", "Doe", "jane@berkeley.edu") → different person         │
-│                                                                     │
-│ Rationale:                                                          │
-│ • Same name + missing email → likely same person                  │
-│ • Same name + different emails → likely different people          │
-│ • Prefer email-bearing identity as canonical (more complete)      │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ STEP 3: Identity Mapping                                           │
-│ • Authors not merged → map to themselves (no duplicates found)     │
-│                                                                     │
-│ Example:                                                            │
-│ • ("Jane", "Doe", "jane@stanford.edu") → itself                   │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ OUTPUT: Canonical author mapping                                   │
-│ • author_key → canonical_author_key                                │
-│ • Used for statistics generation                                   │
-│ • Prevents double-counting same person                             │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**Key Design Decisions:**
-
-1. **Email takes priority over name**
-   - More reliable identifier (unique, institutional)
-   - Handles name variations, typos, initials
-
-2. **Name matching is case-sensitive for first/last**
-   - "John Smith" ≠ "john smith" (preserves data as entered)
-   - Exact string match required
-
-3. **Empty emails ignored in Step 1**
-   - Only merge by name if email unavailable
-   - Prevents grouping unrelated people with empty emails
-
-4. **Canonical choice is deterministic**
-   - Alphabetically first by (first_name, last_name, email)
-   - Ensures consistent results across runs
-
-5. **Per-author paper deduplication**
-   - After merging, deduplicate papers for each canonical author
-   - Same paper shouldn't count multiple times (e.g., contact author listed twice)
-
-### Affiliation Similarity Algorithm - Flowchart
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ INPUT: All unique affiliations from XML + author email domains │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ STEP 0: Initialize                                                  │
-│ • Extract email domains from author emails                         │
-│ • Filter out public domains (gmail.com, yahoo.com, acm.org, etc.) │
-│ • Normalize institutional domains (student.X → X, mail.X → X)     │
-│ • Create affiliation → email_domain mapping                        │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ STEP 1: Known Aliases (Highest Confidence)                         │
-│ • Check against INSTITUTION_ALIASES whitelist                      │
-│ • Example: "RMIT" + "Royal Melbourne Inst of Tech" → merge        │
-│ • Check blacklist (never merge blacklisted pairs)                 │
-│ • Mark as match_type='known_alias'                                 │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ STEP 2: Email Domain Matching (High Confidence)                    │
-│ For affiliations with same normalized institutional email domain:  │
-│   1. Check if blacklisted → Skip if yes                           │
-│   2. Run basic_similarity_check():                                 │
-│      • Known aliases? → Merge                                      │
-│      • Share distinctive tokens? → Merge                           │
-│      • String similarity >= 0.4? → Merge                           │
-│      • Otherwise → Don't merge (data quality issue)                │
-│   3. Mark as match_type='email_domain'                             │
-│                                                                     │
-│ Example:                                                            │
-│ • "Tsinghua University" @tsinghua.edu.cn                           │
-│ • "Tsinghua Univ" @tsinghua.edu.cn                                 │
-│ • Share token "tsinghua" → Merge ✓                                 │
-│                                                                     │
-│ Counter-example (prevents false positive):                         │
-│ • "City Univ of Hong Kong" @ustc.edu.cn (typo in data)            │
-│ • "USTC" @ustc.edu.cn                                              │
-│ • No shared tokens, similarity < 0.4 → Don't merge ✗               │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ STEP 3: String Similarity (Medium Confidence)                      │
-│ For remaining affiliations not matched by email:                   │
-│   1. Extract distinctive tokens (filter out generic words)         │
-│      Generic: "university", "institute", "of", "the", etc.        │
-│      Distinctive: geographic names, unique identifiers            │
-│   2. Check if blacklisted → Skip if yes                           │
-│   3. Require BOTH conditions:                                      │
-│      • Share distinctive tokens                                    │
-│      • String similarity >= 0.7 (strict threshold)                │
-│   4. Mark as match_type='string_similarity'                        │
-│                                                                     │
-│ Example:                                                            │
-│ • "Beijing Institute of Technology"                                │
-│ • "Beijing Inst. of Tech."                                         │
-│ • Share token "beijing", similarity 0.85 → Merge ✓                 │
-│                                                                     │
-│ Counter-example (prevents false positive):                         │
-│ • "Dalian University of Technology"                                │
-│ • "Delft University of Technology"                                 │
-│ • Different distinctive tokens (dalian ≠ delft) → Don't merge ✗   │
-└────────────────────────────┬───────────────────────────────────────┘
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│ OUTPUT: Similar affiliation groups                                  │
-│ • Each group: list of affiliations + match_type + details         │
-│ • Groups used for merged statistics                                │
-│ • Representative affiliation chosen (shortest, no dept prefix)     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Affiliation Similarity Algorithm (checks.py)
-
-The `find_similar_affiliations()` function uses a three-step priority system with union-find for grouping:
-
-#### Step 0: Initialize Union-Find Structure
-
-```
-For each unique affiliation:
-    parent[affiliation] = affiliation
-    match_info[affiliation] = None
-```
-
-#### Step 1: Group Known Aliases (Highest Confidence)
-
-```
-For each canonical_name, aliases in INSTITUTION_ALIASES:
-    affiliations_in_data = [a for a in all_affiliations if normalize(a) in aliases]
-    
-    If len(affiliations_in_data) >= 2:
-        Pick first as root
-        For each other affiliation:
-            If not blacklisted(affiliation, root):
-                union(affiliation, root)
-                match_info[affiliation] = {
-                    'type': 'known_alias',
-                    'canonical': canonical_name
-                }
-```
-
-**Example:**
-- Data contains: "RMIT University", "Royal Melbourne Institute of Technology", "RMIT"
-- Whitelist defines these as aliases
-- All three merged with match_type='known_alias'
-
-#### Step 2: Group by Exact Email Domain (High Confidence)
-
-```
-Build email_domain_map from XML:
-    For each author with non-empty email:
-        domain = normalize_email_domain(email.split('@')[1])
-        If domain not in PUBLIC_DOMAINS:
-            email_domain_map[affiliation] = domain
-
-For each domain, affiliations_list in email_domain_map (grouped):
-    If len(affiliations_list) >= 2:
-        For each pair (aff1, aff2):
-            If exact_domain_match(aff1, aff2) AND not already_in_same_group(aff1, aff2):
-                If blacklisted(aff1, aff2):
-                    Skip
-                
-                If basic_similarity_check(aff1, aff2):
-                    union(aff1, aff2)
-                    match_info[aff1] = {
-                        'type': 'email_domain',
-                        'domain': domain
-                    }
-
-basic_similarity_check(aff1, aff2):
-    Return (
-        are_known_aliases(aff1, aff2) OR
-        share_distinctive_tokens(aff1, aff2) OR
-        string_similarity(aff1, aff2) >= 0.4
-    )
-```
-
-**Example:**
-- Authors from "Tsinghua University" use @tsinghua.edu.cn
-- Authors from "Tsinghua Univ" also use @tsinghua.edu.cn
-- String similarity check passes (0.95 > 0.4)
-- Both merged with match_type='email_domain'
-
-**False positive prevention:**
-- If author from "City Univ of Hong Kong" mistakenly uses @ustc.edu.cn (should be @cityu.edu.hk)
-- "City Univ of Hong Kong" and "USTC" don't share distinctive tokens
-- String similarity < 0.4
-- basic_similarity_check() fails
-- Affiliations NOT merged (prevents false positive from data quality issue)
-
-#### Step 3: Group by String Similarity (Medium Confidence)
-
-```
-For each remaining affiliation not yet grouped by email:
-    For each other remaining affiliation:
-        If share_distinctive_tokens(aff1, aff2):
-            similarity = string_similarity(aff1, aff2)
-            
-            If similarity >= 0.7:
-                If not blacklisted(aff1, aff2):
-                    union(aff1, aff2)
-                    match_info[aff1] = {'type': 'string_similarity'}
-```
-
-**Example:**
-- "Beijing Institute of Technology" vs "Beijing Inst. of Tech."
-- Share distinctive tokens: {"beijing"}
-- High string similarity (> 0.7)
-- Merged with match_type='string_similarity'
-
-**False negative prevention:**
-- If affiliations share NO distinctive tokens (e.g., "University of Melbourne" vs "University of Michigan")
-- String similarity alone not enough (even if > 0.7)
-- Prevents merging unrelated institutions with similar generic structures
-
-### Email Domain Normalization
-
-The `normalize_email_domain()` function treats institutional subdomains as equivalent:
-
-```python
-SUBDOMAIN_PREFIXES = [
-    'student.', 'mail.', 'connect.', 'alumni.', 'staff.',
-    'students.', 'email.', 'webmail.', 'my.', 'campus.'
-]
-
-def normalize_email_domain(domain):
-    if not domain:
-        return domain
-    
-    for prefix in SUBDOMAIN_PREFIXES:
-        if domain.startswith(prefix):
-            return domain[len(prefix):]  # Strip prefix
-    
-    return domain
-```
-
-**Examples:**
-- student.rmit.edu.au → rmit.edu.au
-- campus.university.edu → university.edu
-- alumni.stanford.edu → stanford.edu
-- regular.domain.edu → regular.domain.edu (no change)
-
-**Rationale:**
-- Students, staff, and alumni are all from the same institution
-- Different email systems (mail., webmail., my.) are same institution
-- Prevents fragmenting affiliation counts by subdomain
-
-### Distinctive Token Extraction
-
-The algorithm identifies tokens that distinguish institutions:
-
-```python
-GENERIC_WORDS = {
-    'university', 'college', 'institute', 'school', 'center',
-    'department', 'of', 'the', 'and', 'for', 'technology',
-    'science', 'research', 'academy', 'education'
-}
-
-def extract_distinctive_tokens(affiliation):
-    # Normalize: lowercase, remove punctuation
-    normalized = normalize_affiliation(affiliation)
-    
-    # Tokenize
-    tokens = normalized.split()
-    
-    # Filter out generic words
-    distinctive = {t for t in tokens if t not in GENERIC_WORDS and len(t) >= 3}
-    
-    return distinctive
-```
-
-**Examples:**
-- "Tsinghua University" → {"tsinghua"}
-- "MIT" → {"mit"}
-- "Royal Melbourne Institute of Technology" → {"royal", "melbourne", "technology"} → {"royal", "melbourne"} (technology is generic)
-- "University of Melbourne" → {"melbourne"}
-
-**Why distinctive tokens:**
-- Generic words like "university", "institute" appear in many institution names
-- Distinctive tokens (geographic names, unique identifiers) are strong signals
-- Prevents false positives (e.g., "University of Technology Sydney" vs "Dalian University of Technology" share "university" and "technology" but not distinctive tokens)
-
-### String Similarity Metric
-
-Uses Levenshtein distance normalized by length:
-
-```python
-def string_similarity(str1, str2):
-    distance = levenshtein_distance(str1, str2)
-    max_len = max(len(str1), len(str2))
-    return 1 - (distance / max_len)
-```
-
-**Examples:**
-- "RMIT" vs "rmit" → similarity = 0.75 (4 char changes / 4 chars)
-- "Tsinghua University" vs "Tsinghua Univ" → similarity ≈ 0.95
-- "RMIT University" vs "Royal Melbourne Institute of Technology" → similarity ≈ 0.18 (very different)
-
-**Threshold:**
-- Step 2 (email domain): 0.4 (lenient, because email domain is strong signal)
-- Step 3 (string similarity): 0.7 (strict, because no other signals)
-
-### Country Normalization Algorithm (statistics.py)
-
-```python
-def normalize_country(country_str):
-    if not country_str:
-        return country_str
-    
-    # Clean input
-    country = country_str.strip()
-    
-    # Try exact lookup (case-insensitive)
-    try:
-        return pycountry.countries.lookup(country).name
-    except LookupError:
-        pass
-    
-    # Handle abbreviations with periods (U.S. → US)
-    if '.' in country:
-        clean = country.replace('.', '').upper()
-        try:
-            return pycountry.countries.lookup(clean).name
-        except LookupError:
-            pass
-    
-    # Handle special mappings
-    SPECIAL_MAPS = {
-        'korea, republic of': 'South Korea',
-        'korea, democratic people\'s republic of': 'North Korea',
-        'russian federation': 'Russia',
-        # ... more mappings
-    }
-    
-    country_lower = country.lower()
-    if country_lower in SPECIAL_MAPS:
-        return SPECIAL_MAPS[country_lower]
-    
-    # Not recognized, return as-is
-    return country_str
-```
+**Author score:** The list of authors with the most papers uses a score. Each paper gives `1 + weight / 10` points. The weights are in `PAPER_TYPE_WEIGHTS` in `statistics.py`. A full paper has the weight 5. The weight of a paper type that is not in the list is `DEFAULT_PAPER_WEIGHT` (3).
 
 ## Configuration
 
-### Institution Aliases (checks.py)
+Change these values in the code if the results are not correct:
 
-Add known institution name variations to `INSTITUTION_ALIASES`:
-
-```python
-INSTITUTION_ALIASES = {
-    "rmit university": {
-        "rmit university",
-        "royal melbourne institute of technology",
-        "rmit"
-    },
-    "the university of melbourne": {
-        "the university of melbourne",
-        "university of melbourne"
-    },
-    # Add more institutions as needed
-}
-```
-
-**Format:**
-- Key: canonical name (lowercase, normalized)
-- Value: set of all known variations (lowercase, normalized)
-
-**When to add:**
-- Institution appears with multiple spellings/abbreviations in data
-- High confidence that variations refer to same institution
-- Prevents false positives from string similarity matching
-
-### Institution Blacklist (checks.py)
-
-Prevent specific institution pairs from merging:
-
-```python
-INSTITUTION_BLACKLIST = [
-    {"rmit university", "the university of melbourne"},
-    {"royal melbourne institute of technology", "the university of melbourne"},
-    {"alibaba group", "ant group"},
-    # Add more forbidden pairs as needed
-]
-```
-
-**Format:**
-- List of sets, each set contains 2+ institution names that should never merge
-- Institution names should be lowercase, normalized
-
-**When to add:**
-- False positives discovered in validation output
-- Institutions have similar names but are distinct entities
-- Geographic proximity causes confusion (both in Melbourne, both use "melbourne" token)
-
-### Email Domain Normalization (checks.py)
-
-Add institutional subdomain prefixes:
-
-```python
-SUBDOMAIN_PREFIXES = [
-    'student.', 'mail.', 'connect.', 'alumni.', 'staff.',
-    'students.', 'email.', 'webmail.', 'my.', 'campus.'
-]
-```
-
-**When to add:**
-- Institution uses non-standard subdomain for email addresses
-- Subdomain fragments affiliation statistics
-- Verification: all subdomain users are from same parent institution
-
-### Public Email Domains (checks.py)
-
-Exclude consumer email providers and generic services from email domain matching:
-
-```python
-PUBLIC_DOMAINS = {
-    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
-    'qq.com', 'foxmail.com', '163.com', '126.com', '139.com', 'sina.com',
-    'sohu.com', 'yeah.net', 'mail.com', 'aol.com', 'icloud.com',
-    'protonmail.com', 'zoho.com', 'yandex.com', 'gmx.com', 'mail.ru',
-    'acm.org'  # Generic email service for ACM members, not affiliation-specific
-}
-```
-
-**Why exclude:**
-- Public domains don't indicate institutional affiliation
-- gmail.com users could be from any institution worldwide
-- acm.org is a generic email service that some authors use, unrelated to their actual affiliation
-- Would create massive false positive groups if used for matching
-
-### Country Name Mappings (statistics.py)
-
-Add special country name mappings:
-
-```python
-SPECIAL_COUNTRY_MAPPINGS = {
-    'korea, republic of': 'South Korea',
-    'korea, democratic people\'s republic of': 'North Korea',
-    'russian federation': 'Russia',
-    # Add more mappings as needed
-}
-```
-
-**When to add:**
-- Official ISO name is not commonly used
-- Want consistent reporting name across datasets
-- Regional or political naming preferences
+| Value | File | Use |
+|---|---|---|
+| `INSTITUTION_ALIASES` | `checks.py` | Add names that are aliases of one institution. The key is the canonical name and the value is a set of aliases. Write all names in lower case. |
+| `INSTITUTION_BLACKLIST` | `checks.py` | Add sets of institutions that must never be in one group, for example `{"alibaba group", "ant group"}`. Write all names in lower case. |
+| `PUBLIC_DOMAINS` | `checks.py`, in `extract_email_domain()` | Add email services that do not identify an institution. |
+| `subdomain_prefixes` | `checks.py`, in `normalize_email_domain()` | Add subdomains that an institution uses for some of its emails. |
+| `name_overrides` | `statistics.py`, in `normalize_country_name()` | Add official country names that you want to show with their usual names. |
+| `PAPER_TYPE_WEIGHTS` | `statistics.py` | Change the weight of each paper type for the author score. |

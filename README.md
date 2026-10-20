@@ -1,103 +1,123 @@
 # ACM TAPS Proceedings Toolkit
 
-Tools for a **Proceedings Chair** taking accepted papers from EasyChair through ACM eRights and TAPS to the front matter, set up for **CHIIR 2027**.
+This toolkit is for the **Proceedings Chair** of **CHIIR 2027**. It moves the data for accepted papers from EasyChair to ACM eRights and TAPS. It also makes the table of contents and the front matter.
 
-**Start here: [`chiir2027_proceedings.ipynb`](chiir2027_proceedings.ipynb).** It is the runbook. It walks through the season in order and explains each step where you need it. Everything that changes from year to year (decisions, paper types, category rules, event ID, dates, committee layout) is set in the step that uses it.
+**Start with [`chiir2027_proceedings.ipynb`](chiir2027_proceedings.ipynb).** This notebook is the procedure. Do its steps in sequence during the proceedings period. Each step contains its instructions and its settings. The settings that change each year are in the step that uses them.
 
-| Step in the notebook | What it produces |
+| Step in the notebook | Result |
 |---|---|
-| 1–3 Load and check the EasyChair export | Decision breakdown, papers per type, issues to fix before ACM sees the data |
-| 4 Ask authors to check their heading | Per-paper heading preview plus an email template |
-| 5 Create the eRights upload | 36-column eRights CSV files (per type and combined), ACM XML, cross-checks, accepted-papers `.docx` |
-| 6 Re-issue one paper | CSV/XML for a single paper after it has been pulled from TAPS/eRights |
-| 7 Table of contents | Cumulative-page TOC from the TAPS `ExportMetadata.xlsx` |
-| 8 Front matter | Merged and cleaned committee lists as `.docx`, plus the front-matter template |
+| 1–3 Load and examine the EasyChair export | A count of the decisions, a count of papers for each paper type, and a list of problems to correct |
+| 4 Ask the authors to examine their headings | A heading preview for each paper and an email template |
+| 5 Make the eRights upload | eRights CSV files with 36 columns, ACM XML, the results of the cross-checks, and a list of accepted papers (`.docx`) |
+| 6 Send one paper again | CSV and XML for one paper, after ACM removes that paper from TAPS and eRights |
+| 7 Table of contents | A table of contents with page numbers, from the TAPS file `ExportMetadata.xlsx` |
+| 8 Front matter | Committee lists (`.docx`) and the front-matter template |
 
-## Setup
+## Installation
 
-Python 3.10+.
+You must have Python 3.10 or a later version.
 
-```bash
-python -m venv .venv
-```
+1. Make a virtual environment:
 
-```bash
-.venv/bin/pip install -r requirements.txt
-```
+   ```bash
+   python -m venv .venv
+   ```
 
-```bash
-.venv/bin/nbstripout --install
-```
+2. Install the dependencies:
 
-The last command makes git strip notebook outputs, which contain author names and emails, so they are never committed. Keep EasyChair and TAPS exports **outside the repository** (the notebook defaults to `~/CHIIR2027-proceedings`). `.gitignore` also ignores spreadsheets, CSV, XML and Word files as a safety net.
+   ```bash
+   .venv/bin/pip install -r requirements.txt
+   ```
 
-To try everything on invented data:
+3. Install the `nbstripout` Git filter:
 
-```bash
-.venv/bin/python tests/fixtures/make_fixtures.py ~/CHIIR2027-demo
-```
+   ```bash
+   .venv/bin/nbstripout --install
+   ```
 
-Then set `DATA_DIR = Path.home() / "CHIIR2027-demo"` in step 1 of the notebook.
+**WARNING:** Do not put EasyChair or TAPS exports in the repository. These files contain the names and emails of authors. Keep them in a different folder. The default folder in the notebook is `~/CHIIR2027-proceedings`.
 
-## Lessons from previous CHIIR chairs (built in)
+The `nbstripout` filter removes the notebook outputs before each commit, because the outputs also contain author data. The `.gitignore` file also ignores spreadsheet, CSV, XML and Word files.
 
-- **TAPS prints the eRights data, not the camera-ready source.** Affiliations, emails and addresses in the paper heading come from eRights. If an author puts too much into a field, the heading comes out wrong, and fixing it means removing the paper from TAPS and its eRights form. So the toolkit:
-  - flags over-detailed affiliations (`affiliation_too_detailed`)
-  - produces a heading preview to send authors *before* the eRights upload
-  - gives a re-issue path for the 1–2 papers that will still go wrong
-- **One contact author, the first one marked.** Authors often mark several corresponding authors. ACM used to email the last one, usually a senior author who doesn't respond. Now the first marked author with an email is the contact, and papers with several marked are listed.
-- **Expect to repeat instructions.** The email template in step 4 is meant to be sent more than once.
+To try the toolkit with invented data, do these steps:
+
+1. Make the invented data:
+
+   ```bash
+   .venv/bin/python tests/fixtures/make_fixtures.py ~/CHIIR2027-demo
+   ```
+
+2. In step 1 of the notebook, set `DATA_DIR = Path.home() / "CHIIR2027-demo"`.
+
+## Lessons from the previous CHIIR chairs
+
+The toolkit includes these lessons:
+
+- **TAPS uses the eRights data for the paper heading.** TAPS does not use the affiliations, emails or addresses in the camera-ready source. If an author writes too much in a field, the heading is not correct. To correct the heading, ACM must remove the paper from TAPS and remove its eRights form. Thus, the toolkit does these tasks:
+  - It finds affiliations that contain too much detail (`affiliation_too_detailed`).
+  - It makes a heading preview. Send this preview to the authors before the eRights upload.
+  - It gives a procedure to send one paper again. Use it for the one or two papers that still have problems.
+- **There is only one contact author: the first author who has the corresponding mark.** Authors often mark more than one author as corresponding. Previously, ACM sent emails to the last marked author. This author was usually a senior author who did not reply. Now the contact author is the first marked author who has an email. The toolkit shows all papers that have more than one marked author.
+- **Authors do not always read the instructions.** Be prepared to send the email template in step 4 more than once.
 
 ## Command line
 
-The notebook's last cell saves the conference settings as JSON and prints the matching command, so the export can be repeated without Jupyter. For example:
+The last cell of the notebook writes the conference settings to a JSON file. It also shows the related command. Use this command to do the export again without Jupyter. For example:
 
 ```bash
 python easychair_export.py --config chiir2027.json --input submission.csv author.csv --format csv --event_id 1234567 --submission_date 15-OCT-2026 --approval_date 01-DEC-2026 --output out/
 ```
 
-Other formats are `--format xml --proceeding_id 2027-CHIIR`, `--format preview`, and `txt`/`md` (plain lists). `--paper_id N` exports one paper only. Every export is cross-checked against the raw EasyChair data, and the command exits with status 1 on errors.
+These are the other formats:
 
-| Script | Purpose |
+- `--format xml --proceeding_id 2027-CHIIR` for ACM XML
+- `--format preview` for the heading preview
+- `--format txt` or `--format md` for a simple list of papers
+
+Use `--paper_id N` to export only paper N. The command compares each export with the EasyChair data. If it finds an error, the exit status is 1.
+
+| Script | Function |
 |---|---|
-| `easychair_export.py` | EasyChair → eRights CSV / ACM XML / preview / lists |
-| `validate_acm_xml.py` | Deeper analysis of ACM XML: contact authors, similar affiliations, merged identities, statistics (`--interactive`, `--output`) |
-| `generate_toc.py` | TAPS `ExportMetadata.xlsx` → TOC `.txt`/`.csv` |
-| `scan_referees.py` | Merge and clean committee spreadsheets (`--layout` for this year's files, `--mappings affiliations_mapping.json`) |
-| `referees_to_docx.py` | Committee sheets → front-matter `.docx` (`--section "SHEET=Heading:"`) |
-| `papers_to_docx.py` | ACM XML → accepted-papers list `.docx` for the website |
+| `easychair_export.py` | Converts the EasyChair export to eRights CSV, ACM XML, a heading preview or a list |
+| `validate_acm_xml.py` | Analyzes ACM XML: contact authors, similar affiliations, authors with more than one identity, statistics (`--interactive`, `--output`) |
+| `generate_toc.py` | Converts the TAPS file `ExportMetadata.xlsx` to a table of contents (`.txt` and `.csv`) |
+| `scan_referees.py` | Merges and cleans the committee spreadsheets (`--layout` for the files of the year, `--mappings affiliations_mapping.json`) |
+| `referees_to_docx.py` | Converts committee sheets to a `.docx` file for the front matter (`--section "SHEET=Heading:"`) |
+| `papers_to_docx.py` | Converts ACM XML to a `.docx` list of accepted papers for the website |
 
 ## Repository layout
 
 ```
-chiir2027_proceedings.ipynb   runbook (start here)
+chiir2027_proceedings.ipynb   procedure (start here)
 proceedings/                  library: config, models, loader, exporters, crosscheck, validation/
-*.py                          command-line scripts (table above)
-affiliations_mapping.json     optional affiliation canonicalisation map
-templates/                    CHIIR 2026 front matter, as a starting point
-docs/                         how-it-works.md and reference notes
-tests/                        pytest suite; fixtures/ generates invented EasyChair/TAPS data
+*.py                          command-line scripts (see the table above)
+affiliations_mapping.json     optional map of affiliation names
+templates/                    CHIIR 2026 front matter, for use as a starting point
+docs/                         how-it-works.md and reference documents
+tests/                        pytest tests; fixtures/ makes invented EasyChair and TAPS data
 ```
 
-Run the tests with `.venv/bin/python -m pytest tests`. [`docs/how-it-works.md`](docs/how-it-works.md) explains the conversion rules: author order, contact-author choice, multi-affiliation handling, affiliation checks and cross-checks.
+To run the tests, use `.venv/bin/python -m pytest tests`. The document [`docs/how-it-works.md`](docs/how-it-works.md) gives the conversion rules: author sequence, contact author, more than one affiliation, affiliation checks and cross-checks.
 
 ## Troubleshooting
 
-- **No accepted papers found.** The decision labels differ from `ACCEPTED_DECISIONS` in step 2. The printed decision breakdown shows the exact labels.
-- **`uncategorised` error.** Add or adjust a `CategoryRule` in step 2 for the paper's track or form field.
-- **`UnicodeDecodeError`** should not happen any more (CSV falls back to `mac_roman`). If it does, re-save the CSV as UTF-8.
-- **`Missing required columns` from the TOC step.** TAPS column names have changed. Compare the Excel headers with `generate_toc.py`.
-- **TOC page numbers look wrong.** Check `ORDER ID` and `PDFPAGES` in TAPS, then export again.
+| Problem | Cause and remedy |
+|---|---|
+| The notebook finds no accepted papers. | The decision labels are not the same as `ACCEPTED_DECISIONS` in step 2. Compare them with the decision count that the notebook shows. |
+| The notebook shows the error `uncategorised`. | No category rule agrees with the track or form field of the paper. Add or change a `CategoryRule` in step 2. |
+| The script shows `UnicodeDecodeError`. | The CSV file has an unusual encoding. Save the CSV file again with the UTF-8 encoding. |
+| The table of contents step shows `Missing required columns`. | TAPS changed the column names. Compare the Excel column names with the names in `generate_toc.py`. |
+| The page numbers in the table of contents are not correct. | Examine `ORDER ID` and `PDFPAGES` in TAPS. Then export the file from TAPS again. |
 
 ## Acknowledgements
 
-This toolkit combines and builds on two earlier projects:
+This toolkit uses the code of two earlier projects:
 
-- [**acm-proceedings**](https://github.com/MarwahAlaofi/acm-proceedings) by Oleg Zendel and Marwah Khaled Hasan Alaofi (SIGIR proceedings, MIT License; see `LICENSE-MIT-sigir`). It is the source of the validated EasyChair loader, the ACM XML exporter, `validate_acm_xml.py`, the referee scanner and the Word exports.
-- [**ACM-TAPS-Proceedings-Toolkit**](https://github.com/NeuraSearch/ACM-TAPS-Proceedings-Toolkit) by Niall McGuire and Yashar Moshfeghi (CHIIR 2026 proceedings). It is the source of the eRights CSV format, the CHIIR categorisation rules, `generate_toc.py`, the front-matter template and the workflow this README is based on.
+- [**acm-proceedings**](https://github.com/MarwahAlaofi/acm-proceedings) by Oleg Zendel and Marwah Khaled Hasan Alaofi (SIGIR proceedings, MIT License, see `LICENSE-MIT-sigir`). The EasyChair loader with validation, the ACM XML exporter, `validate_acm_xml.py`, the referee scanner and the Word exports come from this project.
+- [**ACM-TAPS-Proceedings-Toolkit**](https://github.com/NeuraSearch/ACM-TAPS-Proceedings-Toolkit) by Niall McGuire and Yashar Moshfeghi (CHIIR 2026 proceedings). The eRights CSV format, the CHIIR category rules, `generate_toc.py`, the front-matter template and the procedure come from this project.
 
-Thanks also to Maria Gäde, whose scripts for earlier CHIIR proceedings (EasyChair XML → ACM eRights) informed this work. No code from them is included.
+We also thank Maria Gäde. Her scripts for earlier CHIIR proceedings (EasyChair XML to ACM eRights) helped this work. This toolkit does not include code from these scripts.
 
-See `NOTICE` for which files derive from which project.
+The `NOTICE` file shows which files come from which project.
 
-Maintained by the CHIIR Proceedings Chair. For questions about ACM systems (eRights, TAPS, front matter), contact your ACM proceedings coordinator.
+The CHIIR Proceedings Chair maintains this toolkit. If you have questions about the ACM systems (eRights, TAPS, front matter), speak to your ACM proceedings coordinator.
