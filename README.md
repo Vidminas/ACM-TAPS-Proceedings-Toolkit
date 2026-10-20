@@ -29,15 +29,15 @@ You must have Python 3.10 or a later version.
    .venv/bin/pip install -r requirements.txt
    ```
 
-3. Install the `nbstripout` Git filter:
-
-   ```bash
-   .venv/bin/nbstripout --install
-   ```
-
 **WARNING:** Do not put EasyChair or TAPS exports in the repository. These files contain the names and emails of authors. Keep them in a different folder. The default folder in the notebook is `~/CHIIR2027-proceedings`.
 
-The `nbstripout` filter removes the notebook outputs before each commit, because the outputs also contain author data. The `.gitignore` file also ignores spreadsheet, CSV, XML and Word files.
+The notebook outputs also contain author data. Thus, the first cell of the notebook installs the `nbstripout` Git filter in the repository, if it is not installed. This filter removes the notebook outputs before each commit. If you edit the notebook without running it, install the filter yourself:
+
+```bash
+.venv/bin/nbstripout --install
+```
+
+The `.gitignore` file also ignores spreadsheet, CSV, XML and Word files.
 
 To try the toolkit with invented data, do these steps:
 
