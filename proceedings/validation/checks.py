@@ -6,6 +6,7 @@ Includes author name validation, email-name consistency, and affiliation similar
 import re
 from difflib import SequenceMatcher
 from collections import defaultdict
+from proceedings.text import clean_affiliation_string
 
 
 def check_name_capitalization(root):
@@ -110,37 +111,6 @@ def normalize_affiliation(affiliation):
     aff = ' '.join(aff.split())
 
     return aff
-
-
-def clean_affiliation_string(affiliation_str):
-    """
-    Clean affiliation string by stripping whitespace and leading/trailing punctuation.
-
-    Handles common data quality issues like:
-    - ", Tsinghua University" → "Tsinghua University"
-    - "MIT, " → "MIT"
-    - " , Stanford University" → "Stanford University"
-
-    Args:
-        affiliation_str: Raw affiliation string from XML
-
-    Returns:
-        str: Cleaned affiliation string
-    """
-    if not affiliation_str:
-        return affiliation_str
-
-    # Strip whitespace
-    cleaned = affiliation_str.strip()
-
-    # Strip leading/trailing punctuation (commas, semicolons, periods, etc.)
-    # Keep stripping until no more leading/trailing punctuation+whitespace
-    while cleaned and cleaned[0] in '.,;:-_':
-        cleaned = cleaned[1:].strip()
-    while cleaned and cleaned[-1] in '.,;:-_':
-        cleaned = cleaned[:-1].strip()
-
-    return cleaned
 
 
 def get_distinctive_tokens(affiliation):

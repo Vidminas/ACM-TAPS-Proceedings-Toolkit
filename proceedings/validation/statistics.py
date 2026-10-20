@@ -9,6 +9,7 @@ Functions for generating comprehensive statistics from XML files including:
 """
 
 from collections import defaultdict, Counter
+from proceedings.text import clean_affiliation_string
 
 try:
     import pycountry
@@ -47,37 +48,6 @@ PAPER_TYPE_WEIGHTS = {
 # Default weight for paper types not explicitly listed (Short, Demo, Industry, Resource, Reproducibility, etc.)
 DEFAULT_PAPER_WEIGHT = 3  # 1.3 points
 # =============================================================================
-
-
-def clean_affiliation_string(affiliation_str):
-    """
-    Clean affiliation string by stripping whitespace and leading/trailing punctuation.
-
-    Handles common data quality issues like:
-    - ", Tsinghua University" → "Tsinghua University"
-    - "MIT, " → "MIT"
-    - " , Stanford University" → "Stanford University"
-
-    Args:
-        affiliation_str: Raw affiliation string from XML
-
-    Returns:
-        str: Cleaned affiliation string
-    """
-    if not affiliation_str:
-        return affiliation_str
-
-    # Strip whitespace
-    cleaned = affiliation_str.strip()
-
-    # Strip leading/trailing punctuation (commas, semicolons, periods, etc.)
-    # Keep stripping until no more leading/trailing punctuation+whitespace
-    while cleaned and cleaned[0] in '.,;:-_':
-        cleaned = cleaned[1:].strip()
-    while cleaned and cleaned[-1] in '.,;:-_':
-        cleaned = cleaned[:-1].strip()
-
-    return cleaned
 
 
 def normalize_country_name(country_str):
