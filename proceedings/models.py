@@ -65,8 +65,12 @@ class Author(BaseModel):
         if v is None or not v or v.strip().lower() == "nan":
             return None
         v = v.strip().lower()
-        # Basic email validation
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
+        # Structural check only: one '@', no spaces, a dotted domain. Real
+        # addresses can contain apostrophes (o'brien@...) and non-ASCII
+        # characters (internationalised domains), which a strict ASCII
+        # pattern wrongly rejects - and a rejected email is blanked, which
+        # can change the contact author.
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s.]{2,}$", v):
             raise ValueError(f"Invalid email format: {v}")
         return v
 
