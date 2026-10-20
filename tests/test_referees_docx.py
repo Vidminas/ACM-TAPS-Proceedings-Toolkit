@@ -25,3 +25,12 @@ def test_affiliation_with_parentheses_round_trips(tmp_path):
     out = tmp_path / "committee.docx"
     write_committee_docx([("Program Committee:", rows)], str(out))  # raises SystemExit on mismatch
     assert committee_text(out)[0] == "Program Committee:    Li Wei (Harbin Institute of Technology (Shenzhen))"
+
+
+def test_missing_affiliation_is_omitted_not_nan(tmp_path):
+    source = tmp_path / "referees.xlsx"
+    pd.DataFrame([{"first name": "Ana", "last name": "Ruiz", "affiliation": ""}]).to_excel(source, index=False)
+    rows = pd.read_excel(source)  # the empty cell comes back as NaN
+    out = tmp_path / "committee.docx"
+    write_committee_docx([("PC:", rows)], str(out))
+    assert committee_text(out) == ["PC:    Ana Ruiz"]

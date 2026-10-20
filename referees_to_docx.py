@@ -71,16 +71,28 @@ def format_name(row: pd.Series) -> str:
     return " ".join(parts)
 
 
+def format_affiliation(row: pd.Series) -> str:
+    """Affiliation text, or "" when the cell is missing (NaN-safe)."""
+    affiliation = row.get("affiliation")
+    return str(affiliation).strip() if pd.notna(affiliation) else ""
+
+
 def add_entry_runs(paragraph, row: pd.Series) -> None:
     """Append three styled runs for one referee: ``Name (``, affiliation, ``)``.
 
     Split into separate runs so the affiliation alone can be italicized while
-    the name and parentheses stay upright.
+    the name and parentheses stay upright. Without an affiliation, only the
+    name is written.
     """
+    affiliation = format_affiliation(row)
+    if not affiliation:
+        style_run(paragraph.add_run(format_name(row)), NAME_FONT, NAME_SIZE)
+        return
+
     name_run = paragraph.add_run(format_name(row) + " (")
     style_run(name_run, NAME_FONT, NAME_SIZE)
 
-    affil_run = paragraph.add_run(str(row["affiliation"]).strip())
+    affil_run = paragraph.add_run(affiliation)
     style_run(affil_run, NAME_FONT, NAME_SIZE, italic=True)
 
     close_run = paragraph.add_run(")")
@@ -146,7 +158,7 @@ def verify_against_excel(doc_path: str, sections: list[tuple[str, pd.DataFrame]]
     content mismatch; prints up to 10 offending rows to stderr first.
     """
     expected = [
-        (format_name(row), str(row["affiliation"]).strip())
+        (format_name(row), format_affiliation(row))
         for _, df in sections
         for _, row in df.iterrows()
     ]
